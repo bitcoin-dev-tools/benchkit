@@ -1,6 +1,5 @@
 ---
 global:
-  database: benchmarks.sqlite
   hyperfine:
     warmup: 1
     runs: 5
@@ -26,23 +25,10 @@ benchmarks:
 
   - name: "Random sleep with multiple parameters"
     hyperfine:
-      command: "python3 ./scripts/example-sleep.py --seed {seed} --max {max}"
+      command: "python3 ./scripts/example-sleep.py {min} {max}"
       runs: 3
       parameter_lists:
-        - var: seed
-          values: ["1", "2", "3"]
+        - var: min
+          values: ["0.0001", "0.0002", "0.0003"]
         - var: max
-          values: ["1", "2"]
-
-  - name: "Use command-name and -L"
-    hyperfine:
-      command: "sleep {duration}s"
-      setup: "./scripts/example-setup.sh"
-      prepare: "./scripts/example-prepare.sh"
-      conclude: "./scripts/example-conclude.sh"
-      cleanup: "./scripts/example-cleanup.sh"
-      warmup: 3
-      runs: 2
-      command_names: ["base 5", "head 10"]
-      parameter_lists:
-        - duration
+          values: ["1", "2", "3"]
