@@ -1,0 +1,48 @@
+---
+global:
+  database: benchmarks.sqlite
+  hyperfine:
+    warmup: 1
+    runs: 5
+    export_json: results.json
+    shell: /bin/bash
+    show_output: true
+  wrapper: "taskset -c 1-14"
+
+benchmarks:
+  - name: "Defined sleep with parameters"
+    env:
+      RUST_LOG: "debug"
+    hyperfine:
+      command: "sleep {duration}s"
+      setup: "./scripts/example-setup.sh"
+      prepare: "./scripts/example-prepare.sh"
+      conclude: "./scripts/example-conclude.sh"
+      cleanup: "./scripts/example-cleanup.sh"
+      warmup: 2
+      parameter_lists:
+        - var: duration
+          values: ["0.1", "0.2", "0.5"]
+
+  - name: "Random sleep with multiple parameters"
+    hyperfine:
+      command: "python3 ./scripts/example-sleep.py --seed {seed} --max {max}"
+      runs: 3
+      parameter_lists:
+        - var: seed
+          values: ["1", "2", "3"]
+        - var: max
+          values: ["1", "2"]
+
+  - name: "Use command-name and -L"
+    hyperfine:
+      command: "sleep {duration}s"
+      setup: "./scripts/example-setup.sh"
+      prepare: "./scripts/example-prepare.sh"
+      conclude: "./scripts/example-conclude.sh"
+      cleanup: "./scripts/example-cleanup.sh"
+      warmup: 3
+      runs: 2
+      command_names: ["base 5", "head 10"]
+      parameter_lists:
+        - duration
