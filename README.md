@@ -1,33 +1,103 @@
 # Benchkit
 
-A benchmarking kit which can read one or more benchmarks from a configuration
-file, execute them and write the results to a database.
+A Rust-based benchmarking toolkit designed for benchmarking Bitcoin Core, using
+[hyperfine](https://github.com/sharkdp/hyperfine) as the underlying
+benchmarking engine.
 
-Currently supported configuration values:
+## Features
 
-## global
+- Run single or multiple benchmarks defined in YAML configuration files
+- Store benchmark results in PostgreSQL for analysis
+- Support for parameterized benchmarks with multiple variable combinations
+- Configurable benchmark environment variables
+- Integration with CI/PR workflows via PR number and run ID tracking
+- Command wrapping support (e.g., `taskset` for CPU pinning)
 
-- database          # the database file to store results in
-- Hyperfine         # hyperfine aruments
-  - warmup_count
-  - runs
-  - shell
-  - name
-  - command
-  - setup
-  - prepare
-  - conclude
-  - cleanup
-- wrapper           # a command to wrap the `hyperfine` command, e.g. `taskset`
+## Prerequisites
 
-## benchmarks
+- Rust 1.84.1 or later
+- PostgreSQL
+- hyperfine
+- sudo access for database operations
 
-- name
-- env               # environment variables
-- hyperfine         # specific hyperfine benchmark commands and arguments.
-                    # these override globals
+## Installation
 
+```bash
+cargo install --path .
+```
 
-Additionally the `benchkit` binary supports passing a `pr_number` and `run_id`
-(e.g. github workflow run id) as cli arguments to be added to the database
-metadata.
+## Usage
+
+### Database Setup
+
+Test database connection:
+```bash
+benchkit db test
+```
+
+Initialize the database:
+```bash
+benchkit db init
+```
+
+Delete database and user (caution):
+```bash
+benchkit db delete
+```
+
+### Running Benchmarks
+
+Run all benchmarks from config:
+```bash
+benchkit run all --config benchmark.yml
+```
+
+Run a specific benchmark:
+```bash
+benchkit run single --config benchmark.yml --name "benchmark-name"
+```
+
+### Configuration
+
+Benchkit uses YAML configuration files to define benchmarks. Example configuration:
+
+```yaml
+global:
+  hyperfine:
+    warmup: 1
+    runs: 5
+    export_json: results.json
+    shell: /bin/bash
+    show_output: true
+  wrapper: "taskset -c 1-14"
+
+benchmarks:
+  - name: "Example Benchmark"
+    env:
+      RUST_LOG: "debug"
+    hyperfine:
+      command: "sleep {duration}s"
+      parameter_lists:
+        - var: duration
+          values: ["0.1", "0.2", "0.5"]
+```
+
+### Environment Variables
+
+Database configuration can be set via environment variables:
+- `PGHOST` (default: localhost)
+- `PGPORT` (default: 5432)
+- `PGDATABASE` (default: benchmarks)
+- `PGUSER` (default: benchkit)
+- `PGPASSWORD` (default: benchcoin)
+
+## Contributing
+
+Contributions are welcome! Please ensure your code:
+- Updates documentation as needed
+- Includes appropriate tests
+- Follows the project's code style
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
