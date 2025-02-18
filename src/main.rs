@@ -149,14 +149,21 @@ async fn main() -> Result<()> {
                 runner.run().await?;
                 println!("All benchmarks completed successfully.");
             }
-            #[allow(unused_variables)]
             RunCommands::Single {
                 config,
                 name,
                 pr_number,
                 run_id,
             } => {
-                unimplemented!("Single benchmarks not yet supported")
+                database::check_connection(&db_config.connection_string()).await?;
+                let runner = benchmarks::Runner::new(
+                    config,
+                    &db_config.connection_string(),
+                    *pr_number,
+                    *run_id,
+                )?;
+                runner.run_single(name).await?;
+                println!("Benchmark completed successfully.");
             }
         },
     }

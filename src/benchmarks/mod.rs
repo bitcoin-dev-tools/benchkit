@@ -42,7 +42,19 @@ impl Runner {
         Ok(())
     }
 
+    pub async fn run_single(&self, name: &str) -> Result<()> {
+        let bench = self
+            .config
+            .benchmarks
+            .iter()
+            .find(|b| b.name == name)
+            .with_context(|| format!("Benchmark not found: {}", name))?;
+
+        self.run_benchmark(bench).await
+    }
+
     async fn run_benchmark(&self, bench: &Benchmark) -> Result<()> {
+        println!("Running benchmark: {}", bench.name);
         self.run_hyperfine(bench)?;
 
         let mut merged_hyperfine = HashMap::new();
