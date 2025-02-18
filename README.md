@@ -45,6 +45,13 @@ Delete database and user (caution):
 benchkit db delete
 ```
 
+### Build Bitcoin Core
+
+Build bitcoind binaries:
+```bash
+benchkit build --src-dir /path/to/benchcoin/src --commits 7fd2804faf,668c9bb609 --out-dir ./binaries
+```
+
 ### Running Benchmarks
 
 Run all benchmarks from config:

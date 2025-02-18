@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
+mod build;
+pub use build::Builder;
 mod config;
 pub use config::{Benchmark, Config, GlobalConfig};
 

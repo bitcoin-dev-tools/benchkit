@@ -1,7 +1,10 @@
 use anyhow::{bail, Result};
 use benchkit::{benchmarks, database};
 use clap::{Parser, Subcommand};
-use std::io::{self};
+use std::{
+    io::{self},
+    path::Path,
+};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -37,7 +40,19 @@ enum Commands {
         command: DbCommands,
     },
     /// Build Bitcoin Core
-    Build,
+    Build {
+        /// benchcoin source directory
+        #[arg(long)]
+        src_dir: String,
+
+        /// List of commits to build
+        #[arg(long, value_delimiter = ',')]
+        commits: Vec<String>,
+
+        /// Directory to place statically-built binaries in
+        #[arg(long)]
+        out_dir: String,
+    },
     /// Run benchmarks
     Run {
         #[command(subcommand)]
@@ -130,8 +145,17 @@ async fn main() -> Result<()> {
                 }
             }
         },
-        Commands::Build => {
-            println!("Building project... Not implemented yet.");
+        Commands::Build {
+            src_dir,
+            commits,
+            out_dir,
+        } => {
+            let builder = benchmarks::Builder::new(
+                Path::new(&src_dir),
+                Path::new(&out_dir),
+                commits.to_vec(),
+            )?;
+            builder.build()?;
         }
         Commands::Run { command } => match command {
             RunCommands::All {
