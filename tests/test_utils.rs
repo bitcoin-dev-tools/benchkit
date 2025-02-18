@@ -21,15 +21,15 @@ impl TestDb {
     }
 
     async fn create_database(db_name: &str) -> Result<()> {
-        std::process::Command::new("sudo")
-            .arg("-u")
-            .arg("postgres")
-            .args([
-                "psql",
-                "-c",
-                &format!("CREATE DATABASE {} WITH OWNER = benchkittest;", db_name),
-            ])
-            .output()?;
+        let mut create = std::process::Command::new("sudo");
+        create.arg("-u").arg("postgres").args([
+            "psql",
+            "-c",
+            &format!("CREATE DATABASE {} WITH OWNER = benchkittest;", db_name),
+        ]);
+
+        println!("Creating new test database with command:\n{:?}", &create);
+        create.output()?;
 
         let (client, connection) = tokio_postgres::connect(
             &format!("postgres://benchkittest:benchkitpw@localhost/{}", db_name),
@@ -74,15 +74,15 @@ impl TestDb {
             )
             .await?;
 
-        std::process::Command::new("sudo")
-            .arg("-u")
-            .arg("postgres")
-            .args([
-                "psql",
-                "-c",
-                &format!("DROP DATABASE IF EXISTS {} WITH (FORCE);", self.db_name),
-            ])
-            .output()?;
+        let mut drop = std::process::Command::new("sudo");
+        drop.arg("-u").arg("postgres").args([
+            "psql",
+            "-c",
+            &format!("DROP DATABASE IF EXISTS {} WITH (FORCE);", self.db_name),
+        ]);
+
+        println!("Dropping test database with command:\n{:?}", &drop);
+        drop.output()?;
 
         Ok(())
     }
@@ -95,15 +95,15 @@ fn random_suffix() -> String {
 
 impl Drop for TestDb {
     fn drop(&mut self) {
-        let status = std::process::Command::new("sudo")
-            .arg("-u")
-            .arg("postgres")
-            .args([
-                "psql",
-                "-c",
-                &format!("DROP DATABASE IF EXISTS {} WITH (FORCE);", self.db_name),
-            ])
-            .status();
+        let mut drop = std::process::Command::new("sudo");
+        drop.arg("-u").arg("postgres").args([
+            "psql",
+            "-c",
+            &format!("DROP DATABASE IF EXISTS {} WITH (FORCE);", self.db_name),
+        ]);
+
+        println!("Dropping test database with command:\n{:?}", &drop);
+        let status = drop.status();
 
         if let Err(e) = status {
             eprintln!("Failed to drop test database {}: {}", self.db_name, e);
