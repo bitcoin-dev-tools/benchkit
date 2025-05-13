@@ -7,6 +7,7 @@ Benchkit now uses an internal benchmarking system that replaces the previous Hyp
 - Precise timing using Rust's `std::time::Instant`
 - Support for parameter substitution matrices
 - Lifecycle hooks for setup, prepare, conclude, and cleanup stages
+- CPU affinity control using hwloc for consistent benchmarking
 - Statistical analysis of benchmark results
 - JSON results export
 - Backward compatibility with existing configuration files
@@ -23,8 +24,11 @@ global:
     runs: 5
     capture_output: false
     
+  # CPU affinity control
+  benchmark_cores: "1-7"    # Cores to run benchmark commands on
+  runner_cores: "0"         # Core to bind the main benchkit process to
+
   # Other global options remain the same
-  wrapper: "taskset -c 1-14"
   source: $HOME/src/core/bitcoin
   scratch: $HOME/.local/state/benchkit/scratch
   commits: ["746ab19d5a13c98ae7492f9b6fb7bd6a2103c65d"]
@@ -48,13 +52,38 @@ benchmarks:
           values: ["450", "32000"]
 ```
 
-### Options
+### Benchmark Options
 
 - `warmup`: Number of warmup runs to perform (not included in results)
 - `runs`: Number of measured runs to perform
 - `capture_output`: Whether to capture and store command output
 - `command`: The command template to execute (with parameter placeholders)
 - `parameter_lists`: Lists of parameters to substitute in the command
+
+### CPU Affinity Options
+
+- `benchmark_cores`: CPU cores to run benchmark commands on (e.g., "1-7", "0,2,4-6")
+- `runner_cores`: CPU core(s) to bind the main benchkit process to (e.g., "0")
+
+This CPU affinity control replaces the previous `wrapper` command approach, providing a more integrated solution using process groups and the hwloc library. The implementation:
+
+1. Binds the main benchkit process to `runner_cores` at startup
+2. For each benchmark command:
+   - Creates a new process group using `process_group(0)` on the Command
+   - Spawns the command in this new process group
+   - Binds the process ID to the specified cores
+   - Binds the entire process group to the same cores (-pid in Linux)
+   - Waits for completion
+
+This approach ensures that all child processes spawned by the benchmark command inherit the CPU affinity constraints, which is crucial for multi-process applications like Bitcoin Core. The use of process groups provides better isolation and ensures that any child processes spawned dynamically during the benchmark's execution will also be constrained to the correct CPU cores.
+
+The main benefits include:
+1. Direct process group binding using Linux's scheduling APIs
+2. No external tools needed (e.g., taskset or hwloc-bind)
+3. Consistent CPU affinity for main processes and all their child processes
+4. Better control over system resources during benchmarking
+5. Process isolation through dedicated process groups
+6. Support for complex CPU core specifications
 
 ## Lifecycle Scripts
 

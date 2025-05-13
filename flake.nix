@@ -39,10 +39,11 @@
             ];
             buildInputs = [
               boost
+              hwloc
               libevent
               rust-bin.stable.latest.default
-              stress
               sqlite
+              stress
             ];
           };
         }

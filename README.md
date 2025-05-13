@@ -8,7 +8,7 @@ A benchmarking toolkit designed for benchmarking Bitcoin Core with an internal b
 - Support for parameterized benchmarks with multiple variable combinations
 - Configurable benchmark environment variables
 - Integration with CI/PR workflows via run ID tracking
-- Command wrapping support (e.g., `taskset` for CPU pinning)
+- CPU affinity control with hwloc for consistent benchmark results
 - System performance tuning and monitoring
 - Patch management and updating
 - Nix flake for devShell
@@ -20,6 +20,7 @@ A benchmarking toolkit designed for benchmarking Bitcoin Core with an internal b
 
 - Rust 1.84.1 or later
 - Nix package manager
+- hwloc library (for CPU affinity control)
 
 ## Installation
 
@@ -111,7 +112,10 @@ global:
     runs: 5
     capture_output: false
 
-  wrapper: "taskset -c 1-14"
+  # CPU affinity control
+  benchmark_cores: "1-7"    # Cores to run benchmark commands on
+  runner_cores: "0"         # Core to bind the main benchkit process to
+
   source: $HOME/src/core/bitcoin
   commits: ["62bd1960fdf", "e932c6168b5"]
   tmp_data_dir: /tmp/benchkit
@@ -146,6 +150,35 @@ These scripts now use named arguments instead of positional arguments. See [Inte
 - If running against a local Bitcoin Core, it's generally easier to configure
   the "seed" node with custom `-port` and `-rpcport` settings, and then connect
   to it from the benchcoin node using `-connect=<host>:<port>`.
+
+## Process Profiling
+
+Benchkit supports runtime profiling of applications, measuring CPU usage, memory consumption, disk I/O, and other metrics over time. This is particularly useful for benchmarking Bitcoin Core operations to identify performance bottlenecks.
+
+### Enabling Profiling
+
+Add the following to your benchmark configuration:
+
+```yaml
+benchmark:
+  # Other benchmark settings
+  profile: true               # Enable profiling
+  profile_interval: 1         # Sample interval in seconds
+```
+
+Profiling will:
+- Track all child processes (including forks)
+- Record CPU, memory, disk I/O stats over time
+- Generate both JSON and CSV output files
+- Record data points at the specified interval
+
+### Profiling Output
+
+Profiling results are stored in the benchmark output directory:
+- `profile_run_N/profile_data.json` - Complete profiling data
+- `profile_run_N/profile_data.csv` - CSV format for easy visualization
+
+The results include per-sample metrics for CPU usage (percentage), memory usage (bytes), virtual memory usage (bytes), disk read/write (bytes), and elapsed time.
 
 ## Contributing
 

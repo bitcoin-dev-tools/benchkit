@@ -4,23 +4,49 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::benchmarks::{RepoSource, RepositoryManager};
 use crate::config::GlobalConfig;
 
 pub struct Builder {
     config: GlobalConfig,
     patches: Vec<String>,
+    repo_manager: Option<RepositoryManager>,
 }
 
 impl Builder {
     pub fn new(config: GlobalConfig) -> Result<Self> {
-        if !config.bench.global.source.exists() {
-            anyhow::bail!(
-                "Source directory does not exist: {}",
-                config.bench.global.source.display()
-            );
-        }
+        let source_path = config.bench.global.source.to_string_lossy().to_string();
+        let repo_source = RepoSource::new(&source_path);
+
         let patches = vec!["0001-validation-assumeutxo-benchmarking-patches.patch".to_string()];
-        Ok(Self { config, patches })
+
+        match &repo_source {
+            RepoSource::Local(path) => {
+                // For local repos, verify the path exists
+                if !path.exists() {
+                    anyhow::bail!("Source directory does not exist: {}", path.display());
+                }
+
+                // We don't need a repo manager for local repos
+                Ok(Self {
+                    config,
+                    patches,
+                    repo_manager: None,
+                })
+            }
+            RepoSource::Remote(url) => {
+                // For remote repos, create a repository manager
+                info!("Using remote Git repository: {}", url);
+                let repo_cache_dir = config.bench.global.scratch.join("repos");
+                let repo_manager = RepositoryManager::new(&source_path, &repo_cache_dir);
+
+                Ok(Self {
+                    config,
+                    patches,
+                    repo_manager: Some(repo_manager),
+                })
+            }
+        }
     }
 
     fn binary_exists(&self, commit: &str) -> bool {
@@ -28,14 +54,26 @@ impl Builder {
         binary_path.exists()
     }
 
-    pub fn build(&self) -> Result<()> {
-        self.check_clean_worktree()?;
-        let initial_ref = self.get_initial_ref()?;
+    pub fn build(&mut self) -> Result<()> {
+        // If we're using a remote repository, ensure it's available
+        let source_dir = if let Some(repo_manager) = &mut self.repo_manager {
+            let repo_path = repo_manager.ensure_repository_available()?;
+            repo_manager.validate_commits(&self.config.bench.global.commits)?;
+            repo_path
+        } else {
+            // Using a local repository
+            self.config.bench.global.source.clone()
+        };
 
+        self.check_clean_worktree(&source_dir)?;
+        // Get the initial reference to restore later
+        let initial_ref = self.get_initial_ref(&source_dir)?;
+
+        // Build all commits up-front
         for commit in &self.config.bench.global.commits {
             if !self.binary_exists(commit) {
                 info!("Building binary for commit {}", commit);
-                self.build_commit(commit)?;
+                self.build_commit(&source_dir, commit)?;
             } else {
                 info!(
                     "Binary already exists for commit {}, skipping build",
@@ -44,13 +82,14 @@ impl Builder {
             };
         }
 
-        self.restore_git_state(&initial_ref)?;
+        // Restore the original git state
+        self.restore_git_state(&source_dir, &initial_ref)?;
         Ok(())
     }
 
-    fn check_clean_worktree(&self) -> Result<()> {
+    fn check_clean_worktree(&self, source_dir: &PathBuf) -> Result<()> {
         let unstaged = Command::new("git")
-            .current_dir(&self.config.bench.global.source)
+            .current_dir(source_dir)
             .args(["diff", "--quiet"])
             .status()?;
 
@@ -59,7 +98,7 @@ impl Builder {
         }
 
         let staged = Command::new("git")
-            .current_dir(&self.config.bench.global.source)
+            .current_dir(source_dir)
             .args(["diff", "--quiet", "--staged"])
             .status()?;
 
@@ -69,10 +108,10 @@ impl Builder {
         Ok(())
     }
 
-    fn get_initial_ref(&self) -> Result<String> {
+    fn get_initial_ref(&self, source_dir: &PathBuf) -> Result<String> {
         // Get the initial ref to check back out to afterwards
         let output = Command::new("git")
-            .current_dir(&self.config.bench.global.source)
+            .current_dir(source_dir)
             .arg("symbolic-ref")
             .arg("-q")
             .arg("HEAD")
@@ -82,7 +121,7 @@ impl Builder {
             Ok(String::from_utf8(output.stdout)?.trim().to_string())
         } else {
             let output = Command::new("git")
-                .current_dir(&self.config.bench.global.source)
+                .current_dir(source_dir)
                 .arg("rev-parse")
                 .arg("HEAD")
                 .output()?;
@@ -95,29 +134,40 @@ impl Builder {
         }
     }
 
-    fn build_commit(&self, original_commit: &str) -> Result<()> {
-        self.checkout_commit(original_commit)?;
-        let patched_commit = self.apply_patches()?;
+    fn build_commit(&self, source_dir: &PathBuf, original_commit: &str) -> Result<()> {
+        self.checkout_commit(source_dir, original_commit)?;
+        let patched_commit = self.apply_patches(source_dir)?;
         debug!("Commit hash after applying patches: {}", patched_commit);
-        self.run_build(original_commit)?;
+        self.run_build(source_dir, original_commit)?;
         self.copy_binary(original_commit)?;
         Ok(())
     }
 
-    pub fn test_patch_commits(&self) -> Result<()> {
-        self.check_clean_worktree()?;
-        let initial_ref = self.get_initial_ref()?;
+    pub fn test_patch_commits(&mut self) -> Result<()> {
+        // If we're using a remote repository, ensure it's available
+        let source_dir = if let Some(repo_manager) = &mut self.repo_manager {
+            let repo_path = repo_manager.ensure_repository_available()?;
+            repo_manager.validate_commits(&self.config.bench.global.commits)?;
+            repo_path
+        } else {
+            self.config.bench.global.source.clone()
+        };
+
+        self.check_clean_worktree(&source_dir)?;
+        let initial_ref = self.get_initial_ref(&source_dir)?;
+
         for commit in &self.config.bench.global.commits {
-            self.checkout_commit(commit)?;
-            self.test_patches()?;
+            self.checkout_commit(&source_dir, commit)?;
+            self.test_patches(&source_dir)?;
         }
-        self.restore_git_state(&initial_ref)?;
+
+        self.restore_git_state(&source_dir, &initial_ref)?;
         Ok(())
     }
 
-    fn checkout_commit(&self, commit: &str) -> Result<()> {
+    fn checkout_commit(&self, source_dir: &PathBuf, commit: &str) -> Result<()> {
         let status = Command::new("git")
-            .current_dir(&self.config.bench.global.source)
+            .current_dir(source_dir)
             .arg("checkout")
             .arg(commit)
             .status()
@@ -129,12 +179,12 @@ impl Builder {
         Ok(())
     }
 
-    fn apply_patches(&self) -> Result<String> {
-        self.process_patches(false)?;
+    fn apply_patches(&self, source_dir: &PathBuf) -> Result<String> {
+        self.process_patches(source_dir, false)?;
 
         // Get the current commit hash after applying patches
         let output = Command::new("git")
-            .current_dir(&self.config.bench.global.source)
+            .current_dir(source_dir)
             .arg("rev-parse")
             .arg("HEAD")
             .output()
@@ -147,8 +197,8 @@ impl Builder {
         Ok(String::from_utf8(output.stdout)?.trim().to_string())
     }
 
-    fn test_patches(&self) -> Result<()> {
-        self.process_patches(true)
+    fn test_patches(&self, source_dir: &PathBuf) -> Result<()> {
+        self.process_patches(source_dir, true)
     }
 
     fn download_patch(&self, patch_name: &str, patches_dir: &PathBuf) -> Result<()> {
@@ -193,7 +243,7 @@ impl Builder {
         Ok(())
     }
 
-    fn process_patches(&self, check_only: bool) -> Result<()> {
+    fn process_patches(&self, source_dir: &PathBuf, check_only: bool) -> Result<()> {
         self.update_patches(false)?;
 
         let patches_dir = &self.config.app.patch_dir;
@@ -213,7 +263,7 @@ impl Builder {
             info!("{} patch: {}", operation, patch_path.display());
 
             let mut cmd = Command::new("git");
-            cmd.current_dir(&self.config.bench.global.source);
+            cmd.current_dir(source_dir);
 
             if check_only {
                 cmd.arg("apply")
@@ -238,7 +288,7 @@ impl Builder {
                 if !check_only {
                     // If patch application fails, abort the am session
                     let _ = Command::new("git")
-                        .current_dir(&self.config.bench.global.source)
+                        .current_dir(source_dir)
                         .arg("am")
                         .arg("--abort")
                         .status();
@@ -256,7 +306,7 @@ impl Builder {
         Ok(())
     }
 
-    fn run_build(&self, commit_hash: &str) -> Result<()> {
+    fn run_build(&self, source_dir: &PathBuf, commit_hash: &str) -> Result<()> {
         // Make a build-dir using the commit-hash
         let dir = self
             .config
@@ -266,17 +316,17 @@ impl Builder {
             .join(format!("build-{}", commit_hash));
 
         info!("Making build dir: {:?}", dir);
-        fs::create_dir(&dir)?;
+        fs::create_dir_all(&dir)?;
         let canonical_dir = fs::canonicalize(&dir)?;
 
         // Run cmake configuration
         let mut cmd = Command::new("cmake");
-        cmd.current_dir(&self.config.bench.global.source)
+        cmd.current_dir(source_dir)
             .arg("-B")
             .arg(&canonical_dir)
             .arg("-DBUILD_CLI=OFF")
-            .arg("-DBUILD_TESTS=OFF")
-            .arg("-DCMAKE_CXX_FLAGS=-fno-omit-frame-pointer");
+            .arg("-DBUILD_TESTS=OFF");
+        // .arg("-DCMAKE_CXX_FLAGS=-fno-omit-frame-pointer");
 
         let config_status = cmd
             .status()
@@ -287,33 +337,15 @@ impl Builder {
         }
 
         // Run cmake build
-        let mut cmake_build = if std::env::var("CI").is_ok() {
-            let mut cmd = Command::new("taskset");
-            cmd.current_dir(&self.config.bench.global.source)
-                .arg("-c")
-                .arg("2-15")
-                .arg("chrt")
-                .arg("-f")
-                .arg("1")
-                .arg("cmake")
-                .arg("--build")
-                .arg(&canonical_dir)
-                .arg("--target")
-                .arg("bitcoind")
-                .arg("--parallel");
-            cmd
-        } else {
-            let mut cmd = Command::new("cmake");
-            cmd.current_dir(&self.config.bench.global.source)
-                .arg("--build")
-                .arg(&canonical_dir)
-                .arg("--target")
-                .arg("bitcoind")
-                .arg("--parallel");
-            cmd
-        };
+        let mut cmd = Command::new("cmake");
+        cmd.current_dir(source_dir)
+            .arg("--build")
+            .arg(&canonical_dir)
+            .arg("--target")
+            .arg("bitcoind")
+            .arg("--parallel");
 
-        let build_status = cmake_build
+        let build_status = cmd
             .status()
             .with_context(|| format!("Failed to build bitcoind for commit {commit_hash}"))?;
 
@@ -339,6 +371,11 @@ impl Builder {
             .join(format!("bitcoind-{}", commit_hash));
         debug!("Copying {src_path:?} to {dest_path:?}");
 
+        // Make sure the destination directory exists
+        if let Some(parent) = dest_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
         std::fs::copy(&src_path, &dest_path)
             .with_context(|| format!("Failed to copy binary for commit {commit_hash}"))?;
 
@@ -359,9 +396,9 @@ impl Builder {
         Ok(())
     }
 
-    fn restore_git_state(&self, initial_ref: &str) -> Result<()> {
+    fn restore_git_state(&self, source_dir: &PathBuf, initial_ref: &str) -> Result<()> {
         let status = Command::new("git")
-            .current_dir(&self.config.bench.global.source)
+            .current_dir(source_dir)
             .arg("checkout")
             .arg(initial_ref)
             .status()

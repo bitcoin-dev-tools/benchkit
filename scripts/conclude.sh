@@ -37,14 +37,14 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-# Move datadir files to the outdir
-echo "Moving debug.log to $OUT_DIR/$COMMIT"
-mkdir -p "$OUT_DIR"/"$COMMIT"
-# Now we can include ITERATION in this filepath
+# Move datadir files to the outdir in a structured way
+echo "Moving debug.log to $OUT_DIR/$COMMIT/$ITERATION/"
+mkdir -p "$OUT_DIR"/"$COMMIT"/"$ITERATION"
+# Store debug.log in commit/iteration directory
 if [ "$NETWORK" = "mainnet" ]; then
-    mv "$TMP_DATADIR"/debug.log "$OUT_DIR"/"$COMMIT"/debug-${ITERATION}.log
+    mv "$TMP_DATADIR"/debug.log "$OUT_DIR"/"$COMMIT"/"$ITERATION"/debug.log
 else
-    mv "$TMP_DATADIR/$NETWORK/debug.log" "$OUT_DIR"/"$COMMIT"/debug-${ITERATION}.log
+    mv "$TMP_DATADIR/$NETWORK/debug.log" "$OUT_DIR"/"$COMMIT"/"$ITERATION"/debug.log
 fi
 
 echo "Cleaning datadir contents from ${TMP_DATADIR}"

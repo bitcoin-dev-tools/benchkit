@@ -21,6 +21,10 @@ pub struct BenchmarkOptions {
     pub command: Option<String>,
     /// Lists of parameters to substitute in the command
     pub parameter_lists: Option<Vec<Value>>,
+    /// Whether to enable profiling for this benchmark
+    pub profile: Option<bool>,
+    /// Sampling interval for profiling in seconds
+    pub profile_interval: Option<u64>,
 }
 
 fn default_warmup() -> usize {
@@ -38,8 +42,10 @@ pub struct BenchmarkGlobalConfig {
     pub benchmark: Option<BenchmarkOptions>,
     /// Script paths
     pub scripts: Option<HashMap<String, String>>,
-    /// Optional command wrapper (e.g., taskset)
-    pub wrapper: Option<String>,
+    /// CPU cores to run the benchmark on
+    pub benchmark_cores: Option<String>,
+    /// CPU cores to run the main program on
+    pub runner_cores: Option<String>,
     /// Path to source code repository
     pub source: PathBuf,
     /// Path to scratch directory for building
@@ -48,8 +54,6 @@ pub struct BenchmarkGlobalConfig {
     pub commits: Vec<String>,
     /// Temporary data directory for benchmark runs
     pub tmp_data_dir: PathBuf,
-    /// Target host architecture
-    pub host: String,
 }
 
 /// Configuration for a single benchmark
@@ -137,6 +141,17 @@ fn options_to_hashmap(opts: &BenchmarkOptions) -> HashMap<String, Value> {
         map.insert("parameter_lists".to_string(), Value::Array(params.clone()));
     }
 
+    if let Some(profile) = opts.profile {
+        map.insert("profile".to_string(), Value::Bool(profile));
+    }
+
+    if let Some(interval) = opts.profile_interval {
+        map.insert(
+            "profile_interval".to_string(),
+            Value::Number(interval.into()),
+        );
+    }
+
     map
 }
 
@@ -169,12 +184,18 @@ fn hashmap_to_options(map: &HashMap<String, Value>) -> BenchmarkOptions {
         .and_then(|v| v.as_array())
         .cloned();
 
+    let profile = map.get("profile").and_then(|v| v.as_bool());
+
+    let profile_interval = map.get("profile_interval").and_then(|v| v.as_u64());
+
     BenchmarkOptions {
         warmup,
         runs,
         capture_output,
         command,
         parameter_lists,
+        profile,
+        profile_interval,
     }
 }
 

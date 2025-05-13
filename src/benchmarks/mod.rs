@@ -9,12 +9,16 @@ pub use config::{
     BenchmarkOptions, SingleConfig,
 };
 mod parameter;
+mod repository;
+pub use repository::{RepoSource, RepositoryManager};
 mod runner;
 pub use runner::MainRunner;
 mod hook_runner;
 pub use hook_runner::{HookArgs, HookRunner, HookStage};
 mod benchmark_runner;
 pub use benchmark_runner::BenchmarkRunner;
+mod profiler;
+pub use profiler::{ProfileResult, ProfileSample, Profiler};
 pub mod config_adapter;
 // mod object_storage;
 // pub use object_storage::ObjectStorage;

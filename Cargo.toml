@@ -8,7 +8,9 @@ rust-version = "1.84.1"
 anyhow = "1.0.95"
 clap = { version = "4.5.29", features = ["cargo", "derive", "env"] }
 env_logger = "0.11.6"
+hwloc = "0.5.0"
 indicatif = "0.17.11"
+libc = "0.2"
 log = "0.4.26"
 object_store = { version = "0.11.2", features = ["aws"] }
 rand = "0.9.0"

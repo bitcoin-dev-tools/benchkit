@@ -8,6 +8,8 @@ global:
     warmup: 1
     runs: 5
     capture_output: false
+    profile: true
+    profile_interval: 1
 
   # Script hooks for benchmark lifecycle
   scripts:
@@ -16,24 +18,25 @@ global:
     conclude: ./scripts/conclude.sh
     cleanup: ./scripts/cleanup.sh
 
-  # A command wrapper for benchmarks.
-  wrapper: "taskset -c 1-14"
+  # CPU core specifications for affinity control
+  # Cores to run benchmark commands on
+  benchmark_cores: "1-7"
+  # Core to bind the main benchkit process to
+  runner_cores: "0"
 
   # Path to source code (required).
   # Can point to a local or online fork of bitcoin/bitcoin.
   source: $HOME/src/core/bitcoin
+  # source: https://github.com/bitcoin/bitcoin
  
   # The directory binaries will be built into
   scratch: $HOME/.local/state/benchkit/scratch
 
   # Commits to build binaries from (required).
-  commits: ["746ab19d5a13c98ae7492f9b6fb7bd6a2103c65d" ]
+  commits: ["fa48be3ba44", "f9d8910539a"]
 
   # A temporary datadir for Bitcoin Core to use
   tmp_data_dir: /tmp/benchkit
-
-  # The host architecture to build for
-  host: x86_64-linux-gnu
 
 # Local benchmark config.
 benchmarks:
@@ -52,7 +55,8 @@ benchmarks:
       # The correct binary for the [commit] will be substituted and the
       # (bitcoin) [network] applied automatically. {dbcache} is an explicit
       # (additional) parameterisation from [parameter_lists] below.
-      command: "bitcoind -dbcache={dbcache} -stopatheight=170001"
+      command: "bitcoind -dbcache={dbcache} -stopatheight=180000"
+      profile_interval: 1
       warmup: 0
       runs: 2
 

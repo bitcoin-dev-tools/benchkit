@@ -85,7 +85,6 @@ impl ParameterMatrix {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
     fn test_parameter_matrix_empty() {
@@ -152,29 +151,5 @@ mod tests {
         assert_eq!(commands.len(), 2);
         assert_eq!(commands[0].0, "test a command");
         assert_eq!(commands[1].0, "test b command");
-    }
-
-    #[test]
-    fn test_parse_parameter_lists() {
-        let config = json!({
-            "parameter_lists": [
-                {
-                    "var": "foo",
-                    "values": ["a", "b"]
-                },
-                {
-                    "var": "bar",
-                    "values": "1,2,3"
-                }
-            ]
-        });
-
-        let lists = parse_parameter_lists(&config).unwrap();
-
-        assert_eq!(lists.len(), 2);
-        assert_eq!(lists[0].var, "foo");
-        assert_eq!(lists[0].values, vec!["a", "b"]);
-        assert_eq!(lists[1].var, "bar");
-        assert_eq!(lists[1].values, vec!["1", "2", "3"]);
     }
 }

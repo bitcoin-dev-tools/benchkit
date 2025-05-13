@@ -133,13 +133,17 @@ fn main() -> Result<()> {
 
     match &cli.command {
         Commands::Build {} => {
-            let builder = benchmarks::Builder::new(config.clone())?;
+            let mut builder = benchmarks::Builder::new(config.clone())?;
             builder.build()?;
         }
         Commands::Run { name, out_dir } => {
-            let builder = benchmarks::Builder::new(config.clone())?;
+            let mut builder = benchmarks::Builder::new(config.clone())?;
             builder.build()?;
-
+            if let Some(runner_cores) = &config.bench.global.runner_cores {
+                let mut cpu_binder = benchkit::cpu_binding::CpuBinder::new()?;
+                info!("Binding main benchkit process to cores: {}", runner_cores);
+                cpu_binder.bind_current_process_to_cores(runner_cores)?;
+            }
             let runner = benchmarks::Runner::new(config.clone(), out_dir.clone())?;
             runner.run(name.as_deref())?;
             info!(
@@ -154,7 +158,7 @@ fn main() -> Result<()> {
         },
         Commands::Patch { command } => match command {
             PatchCommands::Test {} => {
-                let builder = benchmarks::Builder::new(config.clone())?;
+                let mut builder = benchmarks::Builder::new(config.clone())?;
                 builder.test_patch_commits()?;
             }
             PatchCommands::Update {} => {

@@ -144,13 +144,15 @@ This can be downloaded with `benchkit snapshot download {}`",
             });
         }
 
-        // Create benchmark runner
+        // Create benchmark runner with optional profiling
         let benchmark_runner = crate::benchmarks::benchmark_runner::BenchmarkRunner::new(
             self.out_dir.clone(),
             PathBuf::from("scripts"),
             options.capture_output,
         )
-        .with_parameter_lists(parameter_lists);
+        .with_parameter_lists(parameter_lists)
+        .with_profiling(options.profile.unwrap_or(false), options.profile_interval)
+        .with_benchmark_cores(self.global_config.bench.global.benchmark_cores.clone());
 
         // Get snapshot info
         let snapshot_path = if let Some(snapshot_info) = SnapshotInfo::for_network(

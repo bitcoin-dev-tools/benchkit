@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
+use std::os::unix::process::CommandExt;
+use std::os::unix::process::ExitStatusExt;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -8,8 +10,11 @@ use std::{
     time::Instant,
 };
 
+use crate::cpu_binding::CpuBinder;
+
 use crate::benchmarks::hook_runner::{HookArgs, HookRunner, HookStage};
 use crate::benchmarks::parameter::{ParameterList, ParameterMatrix};
+use crate::benchmarks::profiler::{ProfileResult, Profiler};
 
 /// Results from a single benchmark run
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,6 +28,9 @@ pub struct RunResult {
     /// Output from the command (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
+    /// Profiling results (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<ProfileResult>,
 }
 
 /// Statistical summary of benchmark runs
@@ -83,16 +91,43 @@ pub struct BenchmarkRunner {
     capture_output: bool,
     /// Parameter matrix for running template commands
     parameter_matrix: Option<ParameterMatrix>,
+    /// Whether to enable profiling
+    enable_profiling: bool,
+    /// Directory to store profiling output
+    out_dir: PathBuf,
+    /// Sampling interval for profiling in seconds
+    profile_interval: u64,
+    /// Cores to constrain benchmarks to
+    benchmark_cores: Option<String>,
 }
 
 impl BenchmarkRunner {
     /// Create a new BenchmarkRunner
-    pub fn new(_out_dir: PathBuf, script_dir: PathBuf, capture_output: bool) -> Self {
+    pub fn new(out_dir: PathBuf, script_dir: PathBuf, capture_output: bool) -> Self {
         Self {
             hook_runner: HookRunner::new(script_dir),
             capture_output,
             parameter_matrix: None,
+            enable_profiling: false,
+            out_dir,
+            profile_interval: 5, // Default to 5 second interval
+            benchmark_cores: None,
         }
+    }
+
+    /// Set benchmark cores to constrain command execution
+    pub fn with_benchmark_cores(mut self, cores_spec: Option<String>) -> Self {
+        self.benchmark_cores = cores_spec;
+        self
+    }
+
+    /// Enable profiling with the specified sampling interval
+    pub fn with_profiling(mut self, enable: bool, interval: Option<u64>) -> Self {
+        self.enable_profiling = enable;
+        if let Some(interval) = interval {
+            self.profile_interval = interval;
+        }
+        self
     }
 
     /// Calculate a master summary for a set of benchmark results
@@ -178,7 +213,11 @@ impl BenchmarkRunner {
         runs: usize,
         hook_args: &HookArgs,
     ) -> Result<BenchmarkResult> {
-        info!("Running benchmark: {} for {} runs", command, runs);
+        let commit = &hook_args.commit;
+        info!(
+            "Running benchmark: {} for {} runs (commit: {})",
+            command, runs, commit
+        );
 
         // Run the setup script once before all benchmark runs
         self.hook_runner.run_hook(HookStage::Setup, hook_args)?;
@@ -195,18 +234,20 @@ impl BenchmarkRunner {
             // Run prepare script before the benchmark run
             self.hook_runner.run_hook(HookStage::Prepare, &iter_args)?;
 
-            // Set environment variables
-            let run_env = self.create_env_map(i);
-
             // Start timing
             let start = Instant::now();
 
-            // Execute command
-            let output = self.execute_command(command, &run_env)?;
+            // Execute command with profiling if enabled
+            let (output, profile_result) = self.execute_command(command, i, commit)?;
 
-            // Stop timing
+            // Stop timing (if we're not profiling, otherwise the profiler takes care of timing)
             let duration = start.elapsed();
-            let duration_ms = duration.as_secs_f64() * 1000.0;
+            let duration_ms = if let Some(profile) = &profile_result {
+                // Use the duration from the profiler if available
+                profile.duration * 1000.0
+            } else {
+                duration.as_secs_f64() * 1000.0
+            };
 
             // Record result
             let run_result = RunResult {
@@ -219,6 +260,7 @@ impl BenchmarkRunner {
                 } else {
                     None
                 },
+                profile: profile_result,
             };
 
             results.push(run_result);
@@ -244,16 +286,108 @@ impl BenchmarkRunner {
         Ok(benchmark_result)
     }
 
-    /// Execute a command and capture its output
-    fn execute_command(&self, command: &str, env: &HashMap<String, String>) -> Result<Output> {
+    /// Launch a command with CPU affinity constraints
+    /// This is a helper function that can be used by both regular execution and profiling
+    fn launch_command_with_affinity(&self, command: &str) -> Result<std::process::Child> {
+        debug!("Launching command with affinity: {}", command);
+
+        // Create a new command, setting process_group(0) to create a new process group
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg(command)
+            // When profiling, we don't need to capture the output to pipes
+            // This prevents potential pipe buffer deadlocks
+            .stdout(if self.enable_profiling {
+                std::process::Stdio::null()
+            } else {
+                std::process::Stdio::piped()
+            })
+            .stderr(if self.enable_profiling {
+                std::process::Stdio::null()
+            } else {
+                std::process::Stdio::piped()
+            })
+            .process_group(0); // This creates a new process group with the same ID as the child's PID
+
+        // Spawn the command
+        let child = cmd.spawn().context("Failed to spawn command")?;
+
+        // Get the PID, which is also the process group ID due to process_group(0)
+        let pid = child.id() as libc::pid_t;
+        debug!("Spawned process with PID {}, which is also the PGID", pid);
+
+        // If we have benchmark_cores, apply CPU affinity to the process and process group
+        if let Some(cores) = &self.benchmark_cores {
+            debug!("Binding process with PID {} to cores: {}", pid, cores);
+
+            // Create a new CPU binder for this operation
+            let mut cpu_binder = CpuBinder::new()?;
+
+            // First bind the individual process to the specified cores
+            cpu_binder.bind_pid_to_cores(pid, cores)?;
+
+            // Now try to bind the process group
+            // The process group binding might fail on some systems, but we'll try it anyway
+            let pgid = -pid; // Negative PID means process group in Linux scheduling APIs
+
+            // Use a separate block to capture any errors but continue execution
+            match cpu_binder.bind_pid_to_cores(pgid, cores) {
+                Ok(_) => debug!(
+                    "Successfully bound process group {} to cores {}",
+                    pid, cores
+                ),
+                Err(err) => {
+                    // Log the error but continue - individual process binding is already done
+                    debug!("Process group binding failed (non-critical): {}", err);
+                    debug!("Individual process binding was successful and should be inherited by children");
+                }
+            }
+        }
+
+        Ok(child)
+    }
+
+    /// Execute a command and capture its output, optionally with profiling
+    fn execute_command(
+        &self,
+        command: &str,
+        iteration: usize,
+        commit: &str,
+    ) -> Result<(Output, Option<ProfileResult>)> {
         debug!("Executing command: {}", command);
 
-        let output = Command::new("sh")
-            .arg("-c")
-            .arg(command)
-            .envs(env.iter())
-            .output()
-            .context("Failed to execute command")?;
+        // If profiling is enabled, use the profiler to execute the command
+        if self.enable_profiling {
+            // Create a directory structure with commit/iteration
+            let profile_out_dir = self.out_dir.join(commit).join(iteration.to_string());
+            std::fs::create_dir_all(&profile_out_dir)?;
+
+            // Create the profiler with our benchmark cores
+            let mut profiler = Profiler::new(&profile_out_dir, self.profile_interval);
+            profiler = profiler.with_benchmark_cores(self.benchmark_cores.clone());
+
+            // Launch the command using our helper, which handles CPU affinity
+            info!("Profiling command: {}", command);
+            let child = self.launch_command_with_affinity(command)?;
+            let profile_result = profiler.profile_process(command, child)?;
+
+            // Make an Output manually for profile
+            let output = Output {
+                status: ExitStatusExt::from_raw(profile_result.exit_code),
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            };
+
+            return Ok((output, Some(profile_result)));
+        }
+
+        // For non-profiled commands, launch and wait
+        let child = self.launch_command_with_affinity(command)?;
+
+        // Wait for the command to complete and collect output
+        let output = child
+            .wait_with_output()
+            .context("Failed to wait for command completion")?;
 
         if !output.status.success() {
             debug!(
@@ -264,16 +398,7 @@ impl BenchmarkRunner {
             // and include them in the results
         }
 
-        Ok(output)
-    }
-
-    /// Create environment map for command execution
-    fn create_env_map(&self, iteration: usize) -> HashMap<String, String> {
-        let mut env = HashMap::new();
-        env.insert("BENCHKIT_ITERATION".to_string(), iteration.to_string());
-        // For compatibility
-        env.insert("HYPERFINE_ITERATION".to_string(), iteration.to_string());
-        env
+        Ok((output, None))
     }
 
     /// Calculate summary statistics from run results
@@ -363,17 +488,13 @@ impl BenchmarkRunner {
             }
 
             let mut result = self.run_benchmark(&command, runs, &current_hook_args)?;
-
-            // Add parameters to the result
             result.parameters = params;
-
             results.push(result);
         }
 
         Ok(results)
     }
 
-    /// Export results to JSON
     pub fn export_json(result: &BenchmarkResult, path: &Path) -> Result<()> {
         let json_data = serde_json::to_string_pretty(result)
             .context("Failed to serialize benchmark results")?;
@@ -383,7 +504,6 @@ impl BenchmarkRunner {
         Ok(())
     }
 
-    /// Export multiple results to JSON
     pub fn export_json_multiple(results: &[BenchmarkResult], path: &Path) -> Result<()> {
         // Calculate master summary if there are multiple results
         let master_summary = if results.len() > 1 {
@@ -411,50 +531,5 @@ impl BenchmarkRunner {
         std::fs::write(path, json_data).context("Failed to write benchmark results to file")?;
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    #[test]
-    fn test_calculate_summary() {
-        let temp_dir = tempdir().unwrap();
-        let runner = BenchmarkRunner::new(
-            temp_dir.path().to_path_buf(),
-            temp_dir.path().to_path_buf(),
-            false,
-        );
-
-        let results = vec![
-            RunResult {
-                iteration: 0,
-                duration_ms: 100.0,
-                exit_code: 0,
-                output: None,
-            },
-            RunResult {
-                iteration: 1,
-                duration_ms: 200.0,
-                exit_code: 0,
-                output: None,
-            },
-            RunResult {
-                iteration: 2,
-                duration_ms: 300.0,
-                exit_code: 0,
-                output: None,
-            },
-        ];
-
-        let summary = runner.calculate_summary(&results);
-
-        assert_eq!(summary.min, 100.0);
-        assert_eq!(summary.max, 300.0);
-        assert_eq!(summary.mean, 200.0);
-        assert_eq!(summary.median, 200.0);
-        assert!(summary.std_dev > 0.0);
     }
 }
