@@ -323,10 +323,18 @@ impl Builder {
         let mut cmd = Command::new("cmake");
         cmd.current_dir(source_dir)
             .arg("-B")
-            .arg(&canonical_dir)
-            .arg("-DBUILD_CLI=OFF")
+            .arg(&canonical_dir);
+
+        // Add default build flags
+        cmd.arg("-DBUILD_CLI=OFF")
             .arg("-DBUILD_TESTS=OFF");
-        // .arg("-DCMAKE_CXX_FLAGS=-fno-omit-frame-pointer");
+
+        // Add custom build flags if configured
+        if let Some(cmake_args) = &self.config.bench.global.cmake_build_args {
+            for arg in cmake_args {
+                cmd.arg(arg);
+            }
+        }
 
         let config_status = cmd
             .status()

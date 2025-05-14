@@ -46,6 +46,8 @@ pub struct BenchmarkGlobalConfig {
     pub benchmark_cores: Option<String>,
     /// CPU cores to run the main program on
     pub runner_cores: Option<String>,
+    /// Custom CMake build arguments
+    pub cmake_build_args: Option<Vec<String>>,
     /// Path to source code repository
     pub source: PathBuf,
     /// Path to scratch directory for building

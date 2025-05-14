@@ -24,6 +24,11 @@ global:
   # Core to bind the main benchkit process to
   runner_cores: "0"
 
+  # Optional custom CMake build arguments
+  # Will apply to all commits
+  # cmake_build_args:
+  #   - "-DCMAKE_CXX_FLAGS=-fno-omit-frame-pointer"
+
   # Path to source code (required).
   # Can point to a local or online fork of bitcoin/bitcoin.
   source: $HOME/src/core/bitcoin
