@@ -38,7 +38,7 @@ global:
   scratch: $HOME/.local/state/benchkit/scratch
 
   # Commits to build binaries from (required).
-  commits: ["af7402ccfa", "d1b583181d"]
+  commits: ["e221b252465", "8f73d952214"]
 
   # A temporary datadir for Bitcoin Core to use
   tmp_data_dir: /tmp/benchkit
@@ -46,17 +46,14 @@ global:
 # Local benchmark config.
 benchmarks:
   # benchmark name (required).
-  - name: "assumeutxo signet test sync"
+  - name: "signet test sync"
 
     # Bitcoin network to run on (main, test, testnet4, signet, regtest)
     network: signet
 
     # An optional address for bitcoind to -connect to for sync
-    connect: 127.0.0.1:38333
+    connect: 127.0.0.1:39333
 
-    # Hook mode to use (optional, defaults to "assumeutxo")
-    # Options: "assumeutxo" (uses snapshot syncing), "full_ibd" (full initial block download)
-    # mode: assumeutxo
 
     # Local benchmark options.
     # These override global benchmark options in case of conflict.
@@ -67,10 +64,10 @@ benchmarks:
       #
       # {dbcache} here is an explicit (additional) parameterisation from
       # [parameter_lists] below.
-      command: "bitcoind -dbcache={dbcache} -stopatheight=180000"
+      command: "bitcoind -dbcache={dbcache} -stopatheight=200000"
       profile_interval: 1
       warmup: 0
-      runs: 2
+      runs: 5
 
       # A list of zero or more parameters.
       # These will be tried as a matrix.

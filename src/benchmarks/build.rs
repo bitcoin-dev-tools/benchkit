@@ -9,7 +9,6 @@ use crate::path_utils;
 
 pub struct Builder {
     config: GlobalConfig,
-    patches: Vec<String>,
     repo_manager: Option<RepositoryManager>,
 }
 
@@ -52,8 +51,6 @@ impl Builder {
         // Create RepoSource based on the corrected source
         let repo_source = RepoSource::new(&actual_source);
 
-        let patches = vec!["0001-validation-assumeutxo-benchmarking-patches.patch".to_string()];
-
         match &repo_source {
             RepoSource::Local(path) => {
                 // For local repos, verify the path exists
@@ -65,7 +62,6 @@ impl Builder {
                 // We don't need a repo manager for local repos
                 Ok(Self {
                     config,
-                    patches,
                     repo_manager: None,
                 })
             }
@@ -79,7 +75,6 @@ impl Builder {
 
                 Ok(Self {
                     config,
-                    patches,
                     repo_manager: Some(repo_manager),
                 })
             }
@@ -173,34 +168,8 @@ impl Builder {
 
     fn build_commit(&self, source_dir: &PathBuf, original_commit: &str) -> Result<()> {
         self.checkout_commit(source_dir, original_commit)?;
-        let patched_commit = self.apply_patches(source_dir)?;
-        debug!("Commit hash after applying patches: {patched_commit}");
         self.run_build(source_dir, original_commit)?;
         self.copy_binary(original_commit)?;
-        Ok(())
-    }
-
-    pub fn test_patch_commits(&mut self) -> Result<()> {
-        // If we're using a remote repository, ensure it's available
-        let source_dir = if let Some(repo_manager) = &mut self.repo_manager {
-            let repo_path = repo_manager.ensure_repository_available()?;
-            repo_manager.validate_commits(&self.config.bench.global.commits)?;
-            repo_path
-        } else {
-            // For local repos, use the path directly
-            self.config.bench.global.source.clone()
-        };
-
-        debug!("Testing patches on repository at: {source_dir:?}");
-        self.check_clean_worktree(&source_dir)?;
-        let initial_ref = self.get_initial_ref(&source_dir)?;
-
-        for commit in &self.config.bench.global.commits {
-            self.checkout_commit(&source_dir, commit)?;
-            self.test_patches(&source_dir)?;
-        }
-
-        self.restore_git_state(&source_dir, &initial_ref)?;
         Ok(())
     }
 
@@ -214,135 +183,6 @@ impl Builder {
 
         if !status.success() {
             anyhow::bail!("Git checkout failed for commit {}", commit);
-        }
-        Ok(())
-    }
-
-    fn apply_patches(&self, source_dir: &PathBuf) -> Result<String> {
-        self.process_patches(source_dir, false)?;
-
-        // Get the current commit hash after applying patches
-        let output = Command::new("git")
-            .current_dir(source_dir)
-            .arg("rev-parse")
-            .arg("HEAD")
-            .output()
-            .context("Failed to get HEAD commit hash after applying patches")?;
-
-        if !output.status.success() {
-            anyhow::bail!("Failed to get HEAD commit hash after applying patches");
-        }
-
-        Ok(String::from_utf8(output.stdout)?.trim().to_string())
-    }
-
-    fn test_patches(&self, source_dir: &PathBuf) -> Result<()> {
-        self.process_patches(source_dir, true)
-    }
-
-    fn download_patch(&self, patch_name: &str, patches_dir: &PathBuf) -> Result<()> {
-        let client = reqwest::blocking::Client::new();
-        let url = format!(
-            "https://raw.githubusercontent.com/bitcoin-dev-tools/benchkit/master/patches/{patch_name}"
-        );
-        let response = client.get(&url).send()?;
-
-        if !response.status().is_success() {
-            anyhow::bail!(
-                "Failed to download patch {}: {}",
-                patch_name,
-                response.status()
-            );
-        }
-
-        let content = response.bytes()?;
-        let patch_path = patches_dir.join(patch_name);
-
-        // Ensure the patches directory exists
-        if !patches_dir.exists() {
-            std::fs::create_dir_all(patches_dir)?;
-        }
-
-        std::fs::write(&patch_path, content)?;
-        info!("Successfully downloaded patch: {patch_name}");
-        Ok(())
-    }
-
-    pub fn update_patches(&self, force: bool) -> Result<()> {
-        for patch in &self.patches {
-            let patch_path = &self.config.app.patch_dir.join(patch);
-            if !patch_path.exists() || force {
-                info!("Downloading patch: {patch}");
-                self.download_patch(patch, &self.config.app.patch_dir)?;
-            } else {
-                info!("Patch {patch} already exists, skipping download");
-            }
-        }
-        Ok(())
-    }
-
-    fn process_patches(&self, source_dir: &PathBuf, check_only: bool) -> Result<()> {
-        self.update_patches(false)?;
-
-        let patches_dir = &self.config.app.patch_dir;
-
-        // Verify all patches exist
-        for patch in &self.patches {
-            let patch_path = patches_dir.join(patch);
-            if !patch_path.exists() {
-                anyhow::bail!("Patch file not found: {}", patch_path.display());
-            }
-        }
-
-        // Apply each patch
-        for patch in &self.patches {
-            let patch_path = patches_dir.join(patch);
-            let operation = if check_only { "Testing" } else { "Applying" };
-            info!("{} patch: {}", operation, patch_path.display());
-
-            let mut cmd = Command::new("git");
-            cmd.current_dir(source_dir);
-
-            if check_only {
-                cmd.arg("apply")
-                    .arg("--check")
-                    .arg("--verbose")
-                    .arg("--3way")
-                    .arg(patch_path.display().to_string());
-            } else {
-                cmd.arg("-c")
-                    .arg("user.name=temp")
-                    .arg("-c")
-                    .arg("user.email=temp@temp.com")
-                    .arg("am")
-                    .arg("--3way")
-                    .arg("--no-signoff")
-                    .arg(patch_path.display().to_string());
-            }
-
-            let status = cmd.status().with_context(|| {
-                let action = if check_only { "test" } else { "apply" };
-                format!("Failed to {action} patch {patch}")
-            })?;
-
-            if !status.success() {
-                if !check_only {
-                    // If patch application fails, abort the am session
-                    let _ = Command::new("git")
-                        .current_dir(source_dir)
-                        .arg("am")
-                        .arg("--abort")
-                        .status();
-                }
-                anyhow::bail!(
-                    "Failed to {} patch: {}",
-                    if check_only { "test" } else { "apply" },
-                    patch
-                );
-            }
-
-            let action = if check_only { "tested" } else { "applied" };
-            info!("Successfully {action} patch: {patch}");
         }
         Ok(())
     }

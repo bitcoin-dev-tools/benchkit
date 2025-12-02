@@ -48,6 +48,7 @@
             ];
             buildInputs = [
               boost
+              capnproto
               hwloc
               libevent
               rust-bin.stable.latest.default

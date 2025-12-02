@@ -1,6 +1,4 @@
 use anyhow::{Context, Result};
-#[cfg(target_os = "linux")]
-use log::warn;
 use log::{debug, info};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -255,17 +253,24 @@ impl CommandExecutor {
             if self.context.process_group {
                 let pgid = -pid; // Negative PID means process group in Linux scheduling APIs
 
-                // Use a separate block to capture any errors but continue execution
-                match cpu_binder.bind_pid_to_cores(pgid, cores) {
-                    Ok(_) => debug!(
-                        "Successfully bound process group {} to cores {}",
-                        pid, cores
-                    ),
-                    Err(err) => {
-                        // Log the error but continue - individual process binding is already done
-                        warn!("Process group binding failed (non-critical): {}", err);
-                        debug!("Individual process binding was successful and should be inherited by children");
+                // Check if the process group is properly established before attempting to bind
+                let group_exists = unsafe { libc::getpgid(pid) } == pid;
+
+                if group_exists {
+                    // Use a separate block to capture any errors but continue execution
+                    match cpu_binder.bind_pid_to_cores(pgid, cores) {
+                        Ok(_) => debug!(
+                            "Successfully bound process group {} to cores {}",
+                            pid, cores
+                        ),
+                        Err(err) => {
+                            // Log the error but continue - individual process binding is already done
+                            debug!("Process group binding failed (non-critical): {}", err);
+                            debug!("Individual process binding was successful and should be inherited by children");
+                        }
                     }
+                } else {
+                    debug!("Process group not yet established, skipping group binding (individual binding will be inherited)");
                 }
             }
         }

@@ -2,9 +2,7 @@ use anyhow::Result;
 use log::info;
 use std::path::PathBuf;
 
-use crate::benchmarks::hooks::{
-    AssumeUtxoHookExecutor, FullIbdHookExecutor, HookExecutor, HookMode,
-};
+use crate::benchmarks::hooks::StandardHookExecutor;
 
 /// Represents the different hook script stages
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -26,8 +24,6 @@ pub struct HookArgs {
     pub network: String,
     /// Output directory for benchmark results
     pub out_dir: PathBuf,
-    /// Path to snapshot file
-    pub snapshot_path: PathBuf,
     /// Temporary data directory for the benchmarked process
     pub tmp_data_dir: PathBuf,
     /// Current iteration number
@@ -40,7 +36,7 @@ pub struct HookArgs {
 
 /// HookRunner manages the lifecycle hooks for benchmarks
 pub struct HookRunner {
-    executor: Box<dyn HookExecutor>,
+    executor: StandardHookExecutor,
 }
 
 impl Default for HookRunner {
@@ -50,19 +46,11 @@ impl Default for HookRunner {
 }
 
 impl HookRunner {
-    /// Create a new HookRunner with default (AssumeUTXO) hooks
+    /// Create a new HookRunner with standard hooks
     pub fn new() -> Self {
-        Self::with_mode(HookMode::default())
-    }
-
-    /// Create a new HookRunner with the specified mode
-    pub fn with_mode(mode: HookMode) -> Self {
-        let executor: Box<dyn HookExecutor> = match mode {
-            HookMode::AssumeUtxo => Box::new(AssumeUtxoHookExecutor::new()),
-            HookMode::FullIbd => Box::new(FullIbdHookExecutor::new()),
-        };
-
-        Self { executor }
+        Self {
+            executor: StandardHookExecutor::new(),
+        }
     }
 
     /// Run a hook for the given stage

@@ -11,7 +11,6 @@ A benchmarking toolkit designed for benchmarking Bitcoin Core.
 - System performance tuning and monitoring
 - Process profiling and perf instrumentation (Linux only)
 - Nix flake for integrated build and run shell environment
-- AssumeUTXO snapshot management
 
 ## Prerequisites
 
@@ -32,14 +31,12 @@ git clone https://github.com/bitcoin-dev-tools/benchkit.git && cd benchkit
 # Optional (Recommended)
 nix develop
 
-# Download a signet assumeutxo snapshot
-cargo run -- snapshot download signet
 
 # Build bitcoind binaries from config
 cargo run -- build
 
 # Ensure you have a signet node accepting connections on 127.0.0.1:39333 e.g.:
-# `bitcoind -signet -port=39333 -rpcport=39332 -daemon=1`
+# `bitcoind -signet -daemon=1 -port=39333 -rpcport=39334`
 
 # Run demo benchmarks
 cargo run -- run --out-dir ./out
@@ -100,22 +97,7 @@ benchkit system tune
 benchkit system reset
 ```
 
-### AssumeUTXO Snapshot Management
 
-```bash
-# Download snapshot for specific network
-benchkit snapshot download [mainnet|signet]
-```
-
-### Patch testing
-
-```bash
-# Test the benchcoin patches apply cleanly to all refs
-benchkit patch test
-
-# Fetch latest benchkit patches from github
-benchkit patch update
-```
 
 ## Configuration Files
 
@@ -147,7 +129,7 @@ global:
   host: x86_64-linux-gnu
 
 benchmarks:
-  - name: "assumeutxo signet test sync"
+  - name: "signet test sync"
     network: signet
     connect: 127.0.0.1:39333
     benchmark:

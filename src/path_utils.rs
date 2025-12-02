@@ -100,10 +100,10 @@ mod tests {
         assert_eq!(expand_path_str("/tmp/test"), "/tmp/test");
 
         // With one variable
-        env::set_var("TEST_PATH", "/test/path");
-        let result = expand_path_str("$TEST_PATH/file");
+        env::set_var("TEST_PATH_STR", "/test/path");
+        let result = expand_path_str("$TEST_PATH_STR/file");
         assert!(result.contains("/test/path/file"));
-        env::remove_var("TEST_PATH");
+        env::remove_var("TEST_PATH_STR");
 
         // With HOME variable (if available)
         if let Ok(home) = env::var("HOME") {
@@ -120,11 +120,11 @@ mod tests {
             PathBuf::from("/tmp/test")
         );
 
-        // with env vars
-        env::set_var("TEST_PATH", "/test/path");
-        let result = expand_path_buf(Path::new("$TEST_PATH/file"));
+        // with env vars (use unique name to avoid race with parallel tests)
+        env::set_var("TEST_PATH_BUF", "/test/path");
+        let result = expand_path_buf(Path::new("$TEST_PATH_BUF/file"));
         assert!(result.to_string_lossy().contains("/test/path/file"));
-        env::remove_var("TEST_PATH");
+        env::remove_var("TEST_PATH_BUF");
     }
 
     #[test]

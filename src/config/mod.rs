@@ -12,8 +12,6 @@ use crate::path_utils;
 pub struct AppConfig {
     pub bin_dir: PathBuf,
     pub home_dir: PathBuf,
-    pub patch_dir: PathBuf,
-    pub snapshot_dir: PathBuf,
     #[serde(default)]
     pub path: PathBuf,
 }
@@ -165,8 +163,6 @@ pub struct SingleConfig {
     pub env: Option<HashMap<String, String>>,
     pub network: String,
     pub connect: Option<String>,
-    #[serde(default)]
-    pub mode: Option<String>,
     pub benchmark: HashMap<String, Value>,
 }
 
@@ -205,17 +201,9 @@ pub fn load_app_config(app_config_path: &PathBuf) -> Result<AppConfig> {
     config.path = app_config_path.to_path_buf();
 
     // Expand any relative paths to absolute
-    expand_paths(
-        &mut [
-            &mut config.bin_dir,
-            &mut config.home_dir,
-            &mut config.patch_dir,
-            &mut config.snapshot_dir,
-        ],
-        config_dir,
-    )?;
+    expand_paths(&mut [&mut config.bin_dir, &mut config.home_dir], config_dir)?;
 
-    for dir in [&config.bin_dir, &config.patch_dir, &config.snapshot_dir] {
+    for dir in [&config.bin_dir] {
         if !dir.exists() {
             std::fs::create_dir_all(dir)
                 .with_context(|| format!("Failed to create directory: {}", dir.display()))?;
@@ -341,11 +329,6 @@ fn validate_config(config: &BenchmarkConfig) -> Result<()> {
             "main" | "test" | "signet" | "regtest" => {}
             _ => anyhow::bail!("Invalid network type: {}", benchmark.network),
         }
-
-        if let Some(mode) = &benchmark.mode {
-            use crate::benchmarks::HookMode;
-            HookMode::mode_from_str(mode)?;
-        }
     }
 
     Ok(())
@@ -427,8 +410,6 @@ mod tests {
         let config_content = r#"
         bin_dir: ./bin
         home_dir: ./home
-        patch_dir: ./patches
-        snapshot_dir: ./snapshots
         "#;
 
         let mut file = fs::File::create(&config_path).unwrap();
@@ -438,8 +419,6 @@ mod tests {
 
         assert!(config.bin_dir.is_absolute());
         assert!(config.home_dir.is_absolute());
-        assert!(config.patch_dir.is_absolute());
-        assert!(config.snapshot_dir.is_absolute());
         assert_eq!(config.path, config_path);
     }
 }

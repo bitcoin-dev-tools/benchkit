@@ -1,6 +1,6 @@
 [package]
 name = "benchkit"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.84.1"
 
@@ -10,10 +10,8 @@ clap = { version = "4.5.29", features = ["cargo", "derive", "env"] }
 env_logger = "0.11.6"
 hwloc = "0.5.0"
 regex = "1.10"
-indicatif = "0.17.11"
 libc = "0.2"
 log = "0.4.26"
-reqwest = { version = "0.12.14", default-features = false, features = ["blocking", "rustls-tls"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.138"
 serde_yaml = "0.9.34"

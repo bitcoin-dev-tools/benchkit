@@ -3,9 +3,7 @@ use anyhow::Result;
 use benchkit::{
     benchmarks,
     config::{load_app_config, load_bench_config, AppConfig, BenchmarkConfig, GlobalConfig},
-    download::download_snapshot,
     system::SystemChecker,
-    types::Network,
 };
 
 use clap::{Parser, Subcommand};
@@ -49,20 +47,10 @@ enum Commands {
         #[arg(short, long, required = true)]
         out_dir: PathBuf,
     },
-    /// Download an assumeutxo snapshot
-    Snapshot {
-        #[command(subcommand)]
-        command: SnapshotCommands,
-    },
     /// Check system performance settings
     System {
         #[command(subcommand)]
         command: SystemCommands,
-    },
-    /// Check patches apply cleanly
-    Patch {
-        #[command(subcommand)]
-        command: PatchCommands,
     },
 }
 
@@ -74,24 +62,6 @@ enum SystemCommands {
     Tune,
     /// Reset a previous tune
     Reset,
-}
-
-#[derive(Subcommand, Debug)]
-enum SnapshotCommands {
-    /// Download a snapshot
-    Download {
-        /// Network (mainnet or signet)
-        #[arg(value_enum)]
-        network: Network,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum PatchCommands {
-    /// Download latest patches from GitHub
-    Update {},
-    /// Test the patches will apply cleanly
-    Test {},
 }
 
 fn main() -> Result<()> {
@@ -133,21 +103,6 @@ fn main() -> Result<()> {
                 name.as_deref().unwrap_or("All benchmarks")
             );
         }
-        Commands::Snapshot { command } => match command {
-            SnapshotCommands::Download { network } => {
-                download_snapshot(network, &config.app.snapshot_dir)?;
-            }
-        },
-        Commands::Patch { command } => match command {
-            PatchCommands::Test {} => {
-                let mut builder = benchmarks::Builder::new(config.clone())?;
-                builder.test_patch_commits()?;
-            }
-            PatchCommands::Update {} => {
-                let builder = benchmarks::Builder::new(config.clone())?;
-                builder.update_patches(true)?;
-            }
-        },
         _ => {}
     }
 

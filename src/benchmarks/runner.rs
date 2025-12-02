@@ -1,15 +1,12 @@
 use anyhow::{Context, Result};
-use clap::ValueEnum;
 use log::{debug, info};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::benchmarks::hook_runner::HookArgs;
 use crate::benchmarks::parameters::ParameterList;
 use crate::benchmarks::utils::check_binaries_exist;
 use crate::config::{get_merged_options, GlobalConfig, SingleConfig};
-use crate::download::SnapshotInfo;
 use crate::path_utils;
-use crate::types::Network;
 
 /// High-level benchmark orchestrator that coordinates benchmark execution
 ///
@@ -95,31 +92,7 @@ impl Runner {
         };
 
         for (index, bench) in benchmarks {
-            self.check_snapshot(bench, &self.global_config.app.snapshot_dir)?;
             self.run_benchmark(index, bench)?;
-        }
-
-        Ok(())
-    }
-
-    /// Check if required snapshot exists
-    fn check_snapshot(&self, bench: &SingleConfig, snapshot_dir: &Path) -> Result<()> {
-        // Check if we have the correct snapshot
-        let network = Network::from_str(&bench.network, true)
-            .map_err(|e| anyhow::anyhow!("{}", e))
-            .with_context(|| format!("Invalid network: {:?}", bench.network))?;
-
-        if let Some(snapshot_info) = SnapshotInfo::for_network(&network) {
-            let snapshot_path = snapshot_dir.join(snapshot_info.filename);
-            if !snapshot_path.exists() {
-                anyhow::bail!(
-                    "Missing required snapshot file for network {}: {}\n
-This can be downloaded with `benchkit snapshot download {}`",
-                    bench.network,
-                    snapshot_path.display(),
-                    bench.network
-                );
-            }
         }
 
         Ok(())
@@ -150,13 +123,8 @@ This can be downloaded with `benchkit snapshot download {}`",
             });
         }
 
-        // Create hook runner with appropriate mode
-        let mode = if let Some(mode_str) = &bench.mode {
-            crate::benchmarks::HookMode::mode_from_str(mode_str)?
-        } else {
-            crate::benchmarks::HookMode::default()
-        };
-        let hook_runner = crate::benchmarks::hook_runner::HookRunner::with_mode(mode);
+        // Create hook runner
+        let hook_runner = crate::benchmarks::hook_runner::HookRunner::new();
 
         // Create benchmark runner with optional profiling
         let benchmark_runner = crate::benchmarks::benchmark_runner::BenchmarkRunner::builder(
@@ -170,20 +138,6 @@ This can be downloaded with `benchkit snapshot download {}`",
         .stop_on_log_pattern(options.stop_on_log_pattern.clone())
         .perf_instrumentation(options.perf_instrumentation.unwrap_or(false))
         .build()?;
-
-        // Get snapshot info
-        let snapshot_path = if let Some(snapshot_info) = SnapshotInfo::for_network(
-            &Network::from_str(&bench.network, true)
-                .map_err(|e| anyhow::anyhow!("{}", e))
-                .with_context(|| format!("Invalid network: {:?}", bench.network))?,
-        ) {
-            self.global_config
-                .app
-                .snapshot_dir
-                .join(snapshot_info.filename)
-        } else {
-            self.global_config.app.snapshot_dir.clone() // Fallback
-        };
 
         // Get command template
         let command_template = match &options.command {
@@ -210,7 +164,6 @@ This can be downloaded with `benchkit snapshot download {}`",
             connect_address: bench.connect.clone().unwrap_or_default(),
             network: bench.network.clone(),
             out_dir: self.out_dir.clone(),
-            snapshot_path,
             tmp_data_dir: self.global_config.bench.global.tmp_data_dir.clone(),
             iteration: 0,
             commit: "{commit}".to_string(), // Will be replaced by parameter substitution
